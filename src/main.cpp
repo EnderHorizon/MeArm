@@ -3,12 +3,24 @@
 
 #include "arm_servo.h"
 #include "Timer.h"
+/*
+封装类：
+1.arm_servo里的ArmServo可以直接调用MoveTo()实现目标角度设置
+2.Timer用于舵机实时角度更新
+*/
 
 // 舵机初始化:(引脚)
-ArmServo base(1);     // 底座舵机
-ArmServo shoulder(2); // 大臂舵机
-ArmServo elbow(3);    // 小臂舵机
-ArmServo gripper(4);  // 钳子舵机
+ArmServo servo[4];
+servo[0] = base(1);     // 底座舵机
+servo[1] = shoulder(2); // 大臂舵机
+servo[2] = elbow(3);    // 小臂舵机
+servo[3] = claw(4);     // 钳子舵机
+
+#define BASE 0
+#define SHOULDER 1
+#define ELBOW 2
+#define CLAW 3
+
 // 从串口读取命令
 char cmd[64] = {0};
 size_t index = 0;
@@ -18,20 +30,18 @@ Timer timer;
 
 void setup()
 {
-  // put your setup code here, to run once:
   Serial.begin(115200);
 }
 
 void loop()
 {
-  // put your main code here, to run repeatedly:
   SerialReadCommand();
   // 刷新舵机角度
   float Ts = timer.getTimeInterval(); // Ts单位为秒
-  base.update(Ts);
-  shoulder.update(Ts);
-  elbow.update(Ts);
-  gripper.update(Ts);
+  for (int i = 0; i < 4; ++i)
+  {
+    servo[i].update(Ts);
+  }
 
   // test
   base.MoveTo(90);
@@ -71,17 +81,34 @@ void SerialReadCommand()
   //  上位机发送 “L”：降低机械臂整体运行速度。
   if (cmd[0] == '0' && cmd[1] == '0')
     return;
-  if (strcmp(cmd, "O"))
+  switch (cmd[0])
   {
+  case 'O':
+  case 'S':
+  case 'H':
+    for (int i = 0; i < 4; ++i)
+    {
+      servo[i].addSpeed();
+    }
+  case 'L':
+    for (int i = 0; i < 4; ++i)
+    {
+      servo[i].lowSpeed();
+    }
+  case 'A':
+  case 'B':
+  case 'C':
+
+  case 'x':
+    char *end;
+    int x = strtol(cmd + 1, &end, 10);
+    int y = strtol(end + 2, &end, 10);
+    int z = strtol(end + 2, &end, 10);
+
+    servo[BASE].MoveTo(x);
+    servo[SHOULDER].MoveTo(y);
+    servo[ELBOW].MoveTo(z);
   }
-  else if (strcmp(cmd, "S"))
-  {
-  }
-  else if (strcmp(cmd, "H"))
-  {
-  }
-  else if (strcmp(cmd, "L"))
-  {
-  }
+
   memset(cmd, '0', sizeof(cmd));
 }

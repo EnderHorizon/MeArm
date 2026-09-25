@@ -18,3 +18,15 @@ void ArmServo::update(float Ts)
         servo.write((int)(current_angle -= speed * Ts));
     }
 }
+
+void ArmServo::addSpeed()
+{
+    if(speed < 180)
+        speed += 10;        //速度加量
+}
+
+void ArmServo::lowSpeed()
+{
+    if(speed > 10)
+        speed -= 10; // 速度减量
+}
