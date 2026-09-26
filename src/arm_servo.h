@@ -10,6 +10,7 @@ public:
     float current_angle;
     int speed; // 角度每秒（角度制）：每次更新转动小角度 = current_angle ± speed;
     Servo servo;
+    ArmServo() : pin(0), target_angle(0), current_angle(0), speed(40) {}
     ArmServo(int pin)
         : pin(pin), target_angle(0), current_angle(0), speed(40) // 👈speed初始化值修改处
     {

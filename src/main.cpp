@@ -21,11 +21,12 @@ const int ELBOW = 2;
 const int CLAW = 3;
 // 舵机限位
 
-ArmServo servo[4];
-servo[0] = base(1);     // 底座舵机
-servo[1] = shoulder(2); // 大臂舵机
-servo[2] = elbow(3);    // 小臂舵机
-servo[3] = claw(4);     // 钳子舵机
+ArmServo servo[4] = {
+    ArmServo(1), // 底座舵机
+    ArmServo(2), // 大臂舵机
+    ArmServo(3), // 小臂舵机
+    ArmServo(4)  // 钳子舵机
+};
 
 // 计时器初始化
 Timer timer;
