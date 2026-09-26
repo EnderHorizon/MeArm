@@ -7,32 +7,51 @@
 封装类：
 1.arm_servo里的ArmServo可以直接调用MoveTo()实现目标角度设置
 2.Timer用于舵机实时角度更新
+
+函数：
+1.传感器读取
+2.机械臂运动控制
+3.串口命令
 */
 
 // 舵机初始化:(引脚)
+const int BASE = 0;
+const int SHOULDER = 1;
+const int ELBOW = 2;
+const int CLAW = 3;
+// 舵机限位
+
 ArmServo servo[4];
 servo[0] = base(1);     // 底座舵机
 servo[1] = shoulder(2); // 大臂舵机
 servo[2] = elbow(3);    // 小臂舵机
 servo[3] = claw(4);     // 钳子舵机
 
-#define BASE 0
-#define SHOULDER 1
-#define ELBOW 2
-#define CLAW 3
-
+// 计时器初始化
+Timer timer;
 // 从串口读取命令
 char cmd[64] = {0};
 size_t index = 0;
-void SerialReadCommand(); // 函数声明
-// 计时器初始化
-Timer timer;
+void SerialReadCommand();
+// 传感器读取
+void sensorRead(); // 未实现
+// 机械臂运动控制
+const float FORARM = 10;               // 小臂/cm
+const float UPPERARM = 10;             // 大臂
+const float BASEHEIGHT = 4;            // 底座高度
+const float CLAWLEN = 4;               // 钳子长度
+void catchEntity(int x, int y, int z); // 输入坐标->舵机角度
 
+//  —————————————————
+//  ———— SetUp ——————
+//  —————————————————
 void setup()
 {
   Serial.begin(115200);
 }
-
+//  —————————————————
+//  ————— Loop ——————
+//  —————————————————
 void loop()
 {
   SerialReadCommand();
@@ -44,7 +63,6 @@ void loop()
   }
 
   // test
-  base.MoveTo(90);
 }
 
 // 函数实现
@@ -111,4 +129,38 @@ void SerialReadCommand()
   }
 
   memset(cmd, '0', sizeof(cmd));
+}
+
+void catchEntity(int x, int y, int z)
+{
+  float shoulder_angle = 0;
+  float elbow_angle = 0;
+  float base_angle = 0;
+
+  float h = 0;
+  float L = sqrtf(square(x) + square(y)) - CLAWLEN;
+
+  base_angle = atanf(y / x);
+  if (z > BASEHEIGHT)
+  {
+    h = z - BASEHEIGHT;
+    shoulder_angle = acosf(square(UPPERARM) + square(L) + square(h) - square(FORARM) / 2 * UPPERARM * sqrtf(square(L) + square(h))) + atanf(h / L);
+    elbow_angle = shoulder_angle + acosf(square(UPPERARM) + square(FORARM) - (square(L) + square(h)) / 2 * UPPERARM * FORARM);
+  }
+  else if (z < BASEHEIGHT)
+  {
+    h = BASEHEIGHT - z;
+    shoulder_angle = acosf(square(UPPERARM) + square(L) + square(h) - square(FORARM) / 2 * UPPERARM * sqrtf(square(L) + square(h))) + atanf(L / h);
+    elbow_angle = shoulder_angle + acosf(square(UPPERARM) + square(FORARM) - (square(L) + square(h)) / 2 * UPPERARM * FORARM);
+  }
+  else // z == BASEHEIGHT默认为0
+  {
+    shoulder_angle = acosf(square(UPPERARM) + square(L) - square(FORARM) / 2 * UPPERARM * L);
+    elbow_angle = shoulder_angle + acosf(square(UPPERARM) + square(FORARM) - square(L) / 2 * UPPERARM * FORARM);
+  }
+}
+
+inline float square(float x)
+{
+  return x * x;
 }
