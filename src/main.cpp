@@ -1,13 +1,12 @@
 #include <Arduino.h>
 #include <Servo.h>
 
-#include "arm_servo.h"
+#include "ArmServo.h"
 #include "Timer.h"
 #include "statusRecord.h"
-
-/*
+/*————————————————————————————————————————————————————————————————————————————————
 封装类：
-1.arm_servo里的ArmServo可以直接调用MoveTo()实现目标角度设置
+1.ArmServo可以直接调用MoveTo()实现目标角度设置
 2.Timer用于舵机实时角度更新
 3.statusRecord用于录制时存储路径坐标点
 
@@ -15,9 +14,10 @@
 1.传感器读取
 2.机械臂运动控制
 3.串口命令
+4.记录&播放
 
 !!!注意：因为要涉及记录，所以数组占用空间较大，需要对内存严格管理（arduino uno只有2kb闪存）
-*/
+———————————————————————————————————————————————————————————————————————————————————*/
 
 // 弧度制转角度制
 inline float ToDegree(float radian)
@@ -223,4 +223,8 @@ void record()
   // 清零上次录制
   // 每1/4秒记录一次坐标点&钳子状态
   // 暂停键
+}
+
+void execute()
+{
 }
