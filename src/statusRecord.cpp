@@ -1,0 +1,28 @@
+#include "statusRecord.h"
+
+void statusRecord::clear()
+{
+    for (int i = 0; i < len;++i)//遍历清除
+    {
+        array[i].x = 0;
+        array[i].y = 0;
+        array[i].z = 0;
+        array[i].claw_angle = 0;
+    }
+    len = 0;
+}
+
+void statusRecord::push_back(int16_t x_r, int16_t y_r, int16_t z_r, uint8_t claw_angle_r)
+{
+    // 边界检测,录制时间过长默认丢弃数据
+    if(len < 240)
+    {
+        //存储录制坐标点&钳子角度
+        array[len].x = x_r;
+        array[len].y = y_r;
+        array[len].z = z_r;
+        array[len].claw_angle = claw_angle_r;
+        ++len;
+    }
+}
+

@@ -5,9 +5,11 @@ void ArmServo::init()
     servo.attach(pin);
     //初始化舵机至待机位置
     servo.write(0);
+    Serial.print("舵机初始化引脚：");
+    Serial.println(pin);
 }
 
-void ArmServo::fastturn(int target)
+void ArmServo::fastturn(uint8_t target)
 {
     servo.write(target);
 }
