@@ -1,20 +1,24 @@
 #include <Arduino.h>
 #include <Servo.h>
+#include <Wire.h> //用于arduino之间的I2C通信
 
 #include "ArmServo.h"
 #include "Timer.h"
 #include "statusRecord.h"
+
 /*————————————————————————————————————————————————————————————————————————————————
 封装类：
 1.ArmServo可以直接调用MoveTo()实现目标角度设置
-2.Timer用于舵机实时角度更新
-3.statusRecord用于录制时存储路径坐标点
+2.Claw类继承ArmServo
+3.Timer用于舵机实时角度更新
+4.statusRecord用于录制时存储路径坐标点
 
 函数：
 1.传感器读取
 2.机械臂运动控制
 3.串口命令
 4.记录&播放
+5.arduino I2C通信
 
 !!!注意：因为要涉及记录，所以数组占用空间较大，需要对内存严格管理（arduino uno只有2kb闪存）
 ———————————————————————————————————————————————————————————————————————————————————*/
@@ -34,52 +38,69 @@ inline float square(float x)
   return x * x;
 }
 // 模式：摇杆/命令
-const bool joystickMode = 0;
+const bool joystickMode = false; // true:摇杆模式，false:命令模式
 // 舵机初始化:(引脚)
-const uint8_t BASE = 0;
-const uint8_t SHOULDER = 1;
-const uint8_t ELBOW = 2;
-const uint8_t CLAW = 3;
-// 舵机限位
-
-ArmServo servo[4] = {
-    ArmServo(9), // 底座舵机
-    ArmServo(8), // 大臂舵机
-    ArmServo(7), // 小臂舵机
-    ArmServo(6)  // 钳子舵机
-};
+// 参数：pin, min_angle, max_angle, init_angle
+ArmServo base{9, 0, 180, 90};      // 底座舵机
+ArmServo shoulder{8, 20, 115, 20}; // 大臂舵机
+ArmServo elbow{7, 50, 130, 70};    // 小臂舵机
+ArmServo claw{6, 56, 146, 56};     // 钳子舵机,此处Claw类继承ArmServo类
 
 // 计时器初始化
-Timer timer;
+Timer looptimer;   // loop计时器
+Timer recordtimer; // 录制计时器，0.5s一次
+Timer playtimer;   // 播放计时器，0.5s一次
 // 从串口读取命令
-char cmd[64] = {0};
+char cmd[16] = {0};
 uint8_t index = 0;
 void SerialReadCommand();
 // 传感器读取
 void sensorRead(); // 未实现
 // 机械臂运动控制
-const float FORARM = 10;                           // 小臂/cm
-const float UPPERARM = 10;                         // 大臂
-const float BASEHEIGHT = 4;                        // 底座高度
-const float CLAWLEN = 4;                           // 钳子长度
-void catchEntity(int16_t x, int16_t y, int16_t z); // 输入目标坐标->舵机角度（机械臂逆运动解）
+const float FORARM = 10;                              // 小臂/cm
+const float UPPERARM = 10;                            // 大臂
+const float BASEHEIGHT = 4;                           // 底座高度
+const float CLAWLEN = 4;                              // 钳子长度
+void MoveToPosition(int16_t x, int16_t y, int16_t z); // 输入目标坐标->舵机角度（机械臂逆运动解）
+void returnToInitPosition();                          // 归中
+
+// 夹取，常量定义不同物体的不用钳子需求角度
+const uint8_t EMPTY = 150;
+const uint8_t CUBE = 60;
+const uint8_t BALL = 45;
+const uint8_t COIN = 40;
 
 // 录制&播放
-statusRecord strd; // 可录制60s，每秒取样4次，60 * 4 * 7字节 = 1680字节（具体采样频率根据具体测试再定）
-void record();     // 记录运动路线
-void execute();    // 播放记录
+uint8_t temp_x = 0, temp_y = 0, temp_z = 0, temp_clawAngle = 0;      // 用于
+bool recordMode = false;                                             // 由摇杆模块上的按钮控制,是否录制
+bool isplay = false;                                                 // 由摇杆模块上的按钮控制,是否播放
+statusRecord strd{};                                                 // 可录制60s，每秒取样2次，60 * 2 * 7字节 = 840字节（具体采样频率根据具体测试再定）
+void startrecord();                                                  // 由摇杆按钮控制调用,进行录制前的初始化
+void record(uint16_t x, uint16_t y, uint16_t z, uint8_t claw_angle); // loop中定时调用
+void execute();                                                      // 播放记录，由摇杆按钮控制调用
+                                                                     // arduino I2C通信
 
 //  —————————————————
 //  ———— SetUp ——————
 //  —————————————————
 void setup()
 {
+  // 传感器引脚初始化
+  pinMode(A0, INPUT); // 左摇杆左右
+  pinMode(A1, INPUT); // 左摇杆上下
+  pinMode(A2, INPUT); // 右摇杆左右
+  pinMode(A3, INPUT); // 右摇杆上下
+  // pinMode(2, INPUT);  // 按钮1
+  // pinMode(3, INPUT);  // 按钮2
+
   Serial.println("正在进行初始化......");
   Serial.begin(9600);
-  for (int i = 0; i < 4; ++i)
-  {
-    servo[i].init();
-  }
+  // 舵机初始化
+  base.init();
+  shoulder.init();
+  elbow.init();
+  claw.init();
+
   delay(2000);
 }
 //  —————————————————
@@ -88,22 +109,45 @@ void setup()
 // 每次循环刷新舵机角度，实现多舵机同时运动
 void loop()
 {
+  // 限位：小臂角>大臂角-80
+  int8_t limit = 80 - shoulder.getCurrentAngle();
+  limit = limit > 0 ? limit : 0; // 限位角度不能小于0,否则取0
+  elbow.setLimitation(limit, 130);
+  //  刷新舵机角度
+  float Ts = looptimer.getTimeInterval(); // Ts单位为秒
+  base.update(Ts);
+  shoulder.update(Ts);
+  elbow.update(Ts);
+  claw.update(Ts);
+  // Serial.println(elbow.getCurrentAngle());
+
+  delay(15);
+  // 判断控制模式
   if (joystickMode == true) // 摇杆模式
   {
     sensorRead();
+    // 判断是否进入录制模式，前提要进入摇杆模式
+    if (recordMode == true)
+    {
+      float ReTs = recordtimer.getTimeInterval();
+      if (ReTs > 0.5f) // 单位:秒，间隔0.5s进行一次坐标记录
+      {
+        record(base.getCurrentAngle(), shoulder.getCurrentAngle(), elbow.getCurrentAngle(), claw.getCurrentAngle());
+      }
+    }
+    if (isplay == true)
+    {
+      float playTs = playtimer.getTimeInterval();
+      if (playTs > 0.5f) // 单位:秒，间隔0.5s进行一次坐标记录
+      {
+        execute();
+      }
+    }
   }
   else // 指令模式
   {
     SerialReadCommand();
   }
-
-  //  刷新舵机角度
-  float Ts = timer.getTimeInterval(); // Ts单位为秒
-  for (int i = 0; i < 4; ++i)
-  {
-    servo[i].update(Ts);
-  }
-  delay(15);
   // 测试代码 ↓↓↓
 }
 //  —————————————————
@@ -112,18 +156,18 @@ void loop()
 
 void SerialReadCommand()
 {
+  static bool cmdReady = false; // 设置一个标志位，表示命令是否接收完整，防止主循环快，未接受完
   while (Serial.available())
   {
     char c = Serial.read();
 
     if (c == '\n')
     {
-      cmd[index] = '\n';
-
-      Serial.println("接收命令：");
+      cmd[index] = '\0';
+      Serial.print("接收命令：");
       Serial.println(cmd);
-
       index = 0;
+      cmdReady = true;
       break;
     }
     else if (c != '\r')
@@ -135,55 +179,92 @@ void SerialReadCommand()
       }
     }
   }
-
+  if(!cmdReady)
+    return;
+  cmdReady = false;
   // 命令判断：
-  if (cmd[0] == '0' && cmd[1] == '0')
+  if (cmd[0] == '\0')
     return;
   switch (cmd[0])
   {
   case 'O':
     //  上位机发送 “O”：机械臂爪子张开
+    Serial.println("机械臂爪子张开");
+    claw.MoveTo(40);
+    break;
   case 'S':
     //  上位机发送 “S”：机械臂爪子关闭
+    Serial.println("机械臂爪子关闭");
+    claw.MoveTo(180);
+    break;
   case 'H':
     //  上位机发送 “H”：提升机械臂整体运行速度
-    for (int i = 0; i < 4; ++i)
-    {
-      servo[i].addSpeed();
-    }
+    base.addSpeed();
+    shoulder.addSpeed();
+    elbow.addSpeed();
+    claw.addSpeed();
+    break;
   case 'L':
     //  上位机发送 “L”：降低机械臂整体运行速度
-    for (int i = 0; i < 4; ++i)
-    {
-      servo[i].lowSpeed();
-    }
-
+    base.lowSpeed();
+    shoulder.lowSpeed();
+    elbow.lowSpeed();
+    claw.lowSpeed();
+    break;
   case 'A':
+    // 硬币
+    MoveToPosition(10, 10, 10);
+    // claw.catchEntity(EMPTY);
+    MoveToPosition(100, 100, 100);
+    // claw.release();
+    break;
   case 'B':
+    break;
   case 'C':
+    break;
 
   case 'x':
-    // 检测到第一位是x，就分别取出xyz后的数字，并赋给舵机目标
-    char *end;
-    int x = strtol(cmd + 1, &end, 10); // strtol（初始位指针，返回数字末位指针，进制）
-    int y = strtol(end + 2, &end, 10);
-    int z = strtol(end + 2, &end, 10);
+    // 检测到第一位是x，就分别取出x10,y120,z180后的数字，并赋给舵机目标
+    {
+      int x = 0, y = 0, z = 0;
+      if (sscanf(cmd, "x%d,y%d,z%d", &x, &y, &z) == 3)
+      {
+        Serial.print("接收坐标：");
+        Serial.print(x);
+        Serial.print(",");
+        Serial.print(y);
+        Serial.print(",");
+        Serial.println(z);
 
-    servo[BASE].MoveTo(x);
-    servo[SHOULDER].MoveTo(y);
-    servo[ELBOW].MoveTo(z);
+        base.MoveTo(x);
+        shoulder.MoveTo(y);
+        elbow.MoveTo(z);
+        break;
+      }
+    }
   }
-
-  memset(cmd, '0', sizeof(cmd));
+  memset(cmd, '\0', sizeof(cmd)); // 清空命令数组
+  index = 0;                      // 重置索引
 }
 
 void sensorRead()
 {
-  // 摇杆模拟信号读取x，y
-  // 传输给舵机
+  // 摇杆模拟信号读取x，y, z, claw_angle
+  float dx = -(analogRead(A1) - 513) / 1023.0f * shoulder.getSpeed() / 5;     // deltax
+  float dy = -(analogRead(A0) - 513) / 1023.0f * base.getSpeed() / 5;         // deltay
+  float dz = (analogRead(A3) - 513) / 1023.0f * elbow.getSpeed() / 5;         // deltaz
+  float dclaw_angle = (analogRead(A2) - 513) / 1023.0f * claw.getSpeed() / 5; // 钳子角度
+  // 按钮，调控 recordMode & isplay
+  // uint8_t button1 = digitalRead(2); // 按钮1
+  // uint8_t button2 = digitalRead(3); // 按钮2
+  // 传输给舵机，用MoveTo设置目标角度
+  shoulder.MoveTo(shoulder.getCurrentAngle() + dx);
+  base.MoveTo(base.getCurrentAngle() + dy);
+  elbow.MoveTo(elbow.getCurrentAngle() + dz);
+  claw.MoveTo(claw.getCurrentAngle() + dclaw_angle);
 }
 
-void catchEntity(int16_t x, int16_t y, int16_t z)
+void MoveToPosition(int16_t x, int16_t y, int16_t z)
 {
   // 具体数学推导公式见手写纸
   float shoulder_angle = 0;
@@ -213,18 +294,37 @@ void catchEntity(int16_t x, int16_t y, int16_t z)
   }
 
   // 输出给舵机
-  servo[BASE].MoveTo(ToDegree(base_angle));
-  servo[SHOULDER].MoveTo(ToDegree(shoulder_angle));
-  servo[ELBOW].MoveTo(ToDegree(elbow_angle));
+  base.MoveTo(ToDegree(base_angle));
+  shoulder.MoveTo(ToDegree(shoulder_angle));
+  elbow.MoveTo(ToDegree(elbow_angle));
 }
 
-void record()
+void returnToInitPosition()
+{
+  base.MoveTo(base.init_angle);
+  shoulder.MoveTo(shoulder.init_angle);
+  elbow.MoveTo(elbow.init_angle);
+  claw.MoveTo(claw.init_angle);
+}
+
+void startrecord()
 {
   // 清零上次录制
-  // 每1/4秒记录一次坐标点&钳子状态
-  // 暂停键
+  strd.clear();
 }
 
-void execute()
+inline void record(uint16_t x, uint16_t y, uint16_t z, uint8_t claw_angle)
 {
+  // 每1/2秒记录三舵机角度&钳子状态
+  strd.push_back(x, y, z, claw_angle);
+}
+
+inline void execute()
+{
+  // 从statusRecord中取出一位数据
+  status sta = strd.read();
+  base.MoveTo(sta.x);          // 控制底座舵机
+  shoulder.MoveTo(sta.y);      // 控制大臂舵机
+  elbow.MoveTo(sta.z);         // 控制小臂舵机
+  claw.MoveTo(sta.claw_angle); // 控制钳子开合
 }

@@ -24,4 +24,14 @@ void statusRecord::push_back(int16_t x_r, int16_t y_r, int16_t z_r, uint8_t claw
         array[len].claw_angle = claw_angle_r;
         ++len;
     }
+    Serial.print("录制数据点数：");
+    Serial.print(len);
+}
+
+status statusRecord::read()
+{
+    status sta{array[readindex].x, array[readindex].y, array[readindex].z, array[readindex].claw_angle};
+    ++readindex;
+    --len;
+    return sta;
 }

@@ -22,15 +22,17 @@ struct status // 因为 AVR 是 8 位单片机，avr-gcc 默认对 int16_t 的�
 class statusRecord // 存储状态的数组
 {
 private:
-    uint8_t len; // uint8_t为1字节，可存储0~255，数组大小为240，故不会溢出
-    status array[240];
+    uint8_t len;       // uint8_t为1字节，可存储0~255，数组大小为240，故不会溢出
+    uint8_t readindex; // 用于读取的时候记录读取位置
+    status array[120];
 
 public:
     statusRecord()
-        : len(0), array{} // 初始化，array会自动调用status的默认构造函数
+        : len(0), readindex(0), array{} // 初始化，array会自动调用status的默认构造函数
     {
     }
     ~statusRecord() {}
     void clear();
     void push_back(int16_t x_r, int16_t y_r, int16_t z_r, uint8_t claw_angle_r);
+    status read();
 };
