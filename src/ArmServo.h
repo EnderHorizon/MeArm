@@ -4,7 +4,7 @@
 
 class ArmServo
 {
-public:
+protected:
     uint8_t pin;
     float target_angle;
     float current_angle;
@@ -46,6 +46,7 @@ public:
     float getMaxAngle() { return max_angle; }         // 获取最大角度
     float getMinAngle() { return min_angle; }         // 获取最小角度
     void setInitAngle(uint8_t angle) { init_angle = angle; } // 设置初始角度
+    uint8_t getInitAngle() { return init_angle; } // 获取初始角度
 };
 
 class Claw : public ArmServo // 钳子：继承舵机大类，添加钳子的功能

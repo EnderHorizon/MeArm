@@ -24,7 +24,7 @@ class statusRecord // 存储状态的数组
 private:
     uint8_t len;       // uint8_t为1字节，可存储0~255，数组大小为240，故不会溢出
     uint8_t readindex; // 用于读取的时候记录读取位置
-    status array[120];
+    status array[180];
 
 public:
     statusRecord()
@@ -33,6 +33,6 @@ public:
     }
     ~statusRecord() {}
     void clear();
-    void push_back(int16_t x_r, int16_t y_r, int16_t z_r, uint8_t claw_angle_r);
+    uint8_t push_back(int16_t x_r, int16_t y_r, int16_t z_r, uint8_t claw_angle_r);
     status read();
 };

@@ -38,7 +38,7 @@ inline float square(float x)
   return x * x;
 }
 // 模式：摇杆/命令
-const bool joystickMode = false; // true:摇杆模式，false:命令模式
+const bool joystickMode = true; // true:摇杆模式，false:命令模式
 // 舵机初始化:(引脚)
 // 参数：pin, min_angle, max_angle, init_angle
 ArmServo base{9, 0, 180, 90};      // 底座舵机
@@ -50,6 +50,7 @@ ArmServo claw{6, 56, 146, 56};     // 钳子舵机,此处Claw类继承ArmServo�
 Timer looptimer;   // loop计时器
 Timer recordtimer; // 录制计时器，0.5s一次
 Timer playtimer;   // 播放计时器，0.5s一次
+Timer serialtimer; // 串口计时器，0.5s一次
 // 从串口读取命令
 char cmd[16] = {0};
 uint8_t index = 0;
@@ -69,15 +70,15 @@ const uint8_t EMPTY = 150;
 const uint8_t CUBE = 60;
 const uint8_t BALL = 45;
 const uint8_t COIN = 40;
-
+// 夹取，三种物体
 // 录制&播放
 uint8_t temp_x = 0, temp_y = 0, temp_z = 0, temp_clawAngle = 0;      // 用于
-bool recordMode = false;                                             // 由摇杆模块上的按钮控制,是否录制
+bool isrecord = false;                                               // 由摇杆模块上的按钮控制,是否录制
 bool isplay = false;                                                 // 由摇杆模块上的按钮控制,是否播放
-statusRecord strd{};                                                 // 可录制60s，每秒取样2次，60 * 2 * 7字节 = 840字节（具体采样频率根据具体测试再定）
+statusRecord strd{};                                                 // 可录制60s，每秒取样3次，60 * 3 * 7字节 = 1260字节（具体采样频率根据具体测试再定）
 void startrecord();                                                  // 由摇杆按钮控制调用,进行录制前的初始化
 void record(uint16_t x, uint16_t y, uint16_t z, uint8_t claw_angle); // loop中定时调用
-void execute();                                                      // 播放记录，由摇杆按钮控制调用
+void play();                                                         // 播放记录，由摇杆按钮控制调用
                                                                      // arduino I2C通信
 
 //  —————————————————
@@ -110,7 +111,7 @@ void setup()
 void loop()
 {
   // 限位：小臂角>大臂角-80
-  int8_t limit = 80 - shoulder.getCurrentAngle();
+  int8_t limit = 90 - shoulder.getCurrentAngle();
   limit = limit > 0 ? limit : 0; // 限位角度不能小于0,否则取0
   elbow.setLimitation(limit, 130);
   //  刷新舵机角度
@@ -119,44 +120,54 @@ void loop()
   shoulder.update(Ts);
   elbow.update(Ts);
   claw.update(Ts);
-  // Serial.println(elbow.getCurrentAngle());
 
-  delay(15);
+  delay(15); // 延时15ms，防止舵机刷新过快，导致舵机抖动
+
   // 判断控制模式
   if (joystickMode == true) // 摇杆模式
   {
     sensorRead();
     // 判断是否进入录制模式，前提要进入摇杆模式
-    if (recordMode == true)
+    if (isrecord == true)
     {
-      float ReTs = recordtimer.getTimeInterval();
-      if (ReTs > 0.5f) // 单位:秒，间隔0.5s进行一次坐标记录
+      if (recordtimer.isIntervalEnough(0.3333f)) // 单位:秒，间隔0.33s进行一次坐标记录
       {
         record(base.getCurrentAngle(), shoulder.getCurrentAngle(), elbow.getCurrentAngle(), claw.getCurrentAngle());
       }
     }
     if (isplay == true)
     {
-      float playTs = playtimer.getTimeInterval();
-      if (playTs > 0.5f) // 单位:秒，间隔0.5s进行一次坐标记录
+      if (playtimer.isIntervalEnough(0.3333f)) // 单位:秒，间隔0.33s进行一次坐标记录
       {
-        execute();
+        Serial.print(".");
+        play();
       }
     }
   }
-  else // 指令模式
+  // 每0.5秒读取一次串口命令，防止主循环过快，未接收完
+  if (serialtimer.isIntervalEnough(0.5f))
   {
     SerialReadCommand();
   }
   // 测试代码 ↓↓↓
+  /*
+  Serial.print("base:");
+  Serial.print(base.getCurrentAngle());
+  Serial.print("shoulder:");
+  Serial.print(shoulder.getCurrentAngle());
+  Serial.print("elbow:");
+  Serial.print(elbow.getCurrentAngle());
+  Serial.print("claw:");
+  Serial.println(claw.getCurrentAngle());
+  */
 }
 //  —————————————————
-//  ———— 函数实现 ————
+//  ———— 函数实现 ———
 //  —————————————————
 
 void SerialReadCommand()
 {
-  static bool cmdReady = false; // 设置一个标志位，表示命令是否接收完整，防止主循环快，未接受完
+  static bool cmdReady = false; // 设置一个标志位，表示命令是否接收完整，防止主循环快，未接收完
   while (Serial.available())
   {
     char c = Serial.read();
@@ -179,12 +190,10 @@ void SerialReadCommand()
       }
     }
   }
-  if(!cmdReady)
+  if (!cmdReady) // 是否接收完整
     return;
   cmdReady = false;
   // 命令判断：
-  if (cmd[0] == '\0')
-    return;
   switch (cmd[0])
   {
   case 'O':
@@ -223,19 +232,37 @@ void SerialReadCommand()
   case 'C':
     break;
 
+  case 'R':
+    // record
+    startrecord();
+    isrecord = true;
+    Serial.println("开始录制");
+    break;
+  case 'E':
+    // end record
+    isrecord = false;
+    Serial.println("结束录制");
+    break;
+  case 'P':
+    // play
+    isplay = true;
+    Serial.print("开始播放");
+    break;
+
   case 'x':
     // 检测到第一位是x，就分别取出x10,y120,z180后的数字，并赋给舵机目标
     {
       int x = 0, y = 0, z = 0;
       if (sscanf(cmd, "x%d,y%d,z%d", &x, &y, &z) == 3)
       {
+        /*
         Serial.print("接收坐标：");
         Serial.print(x);
         Serial.print(",");
         Serial.print(y);
         Serial.print(",");
         Serial.println(z);
-
+        */
         base.MoveTo(x);
         shoulder.MoveTo(y);
         elbow.MoveTo(z);
@@ -249,19 +276,22 @@ void SerialReadCommand()
 
 void sensorRead()
 {
-  // 摇杆模拟信号读取x，y, z, claw_angle
-  float dx = -(analogRead(A1) - 513) / 1023.0f * shoulder.getSpeed() / 5;     // deltax
-  float dy = -(analogRead(A0) - 513) / 1023.0f * base.getSpeed() / 5;         // deltay
-  float dz = (analogRead(A3) - 513) / 1023.0f * elbow.getSpeed() / 5;         // deltaz
-  float dclaw_angle = (analogRead(A2) - 513) / 1023.0f * claw.getSpeed() / 5; // 钳子角度
+  if(!isplay) // 只有在非播放模式下，才读取摇杆信号，防止播放时被摇杆信号覆盖
+  {
+    // 摇杆模拟信号读取x，y, z, claw_angle
+    float dx = -(analogRead(A1) - 513) / 1023.0f * shoulder.getSpeed() / 5;     // deltax
+    float dy = -(analogRead(A0) - 513) / 1023.0f * base.getSpeed() / 5;         // deltay
+    float dz = (analogRead(A3) - 513) / 1023.0f * elbow.getSpeed() / 5;         // deltaz
+    float dclaw_angle = (analogRead(A2) - 513) / 1023.0f * claw.getSpeed() / 5; // 钳子角度
+    // 传输给舵机，用MoveTo设置目标角度
+    shoulder.MoveTo(shoulder.getCurrentAngle() + dx);
+    base.MoveTo(base.getCurrentAngle() + dy);
+    elbow.MoveTo(elbow.getCurrentAngle() + dz);
+    claw.MoveTo(claw.getCurrentAngle() + dclaw_angle);
+  }
   // 按钮，调控 recordMode & isplay
   // uint8_t button1 = digitalRead(2); // 按钮1
   // uint8_t button2 = digitalRead(3); // 按钮2
-  // 传输给舵机，用MoveTo设置目标角度
-  shoulder.MoveTo(shoulder.getCurrentAngle() + dx);
-  base.MoveTo(base.getCurrentAngle() + dy);
-  elbow.MoveTo(elbow.getCurrentAngle() + dz);
-  claw.MoveTo(claw.getCurrentAngle() + dclaw_angle);
 }
 
 void MoveToPosition(int16_t x, int16_t y, int16_t z)
@@ -301,10 +331,10 @@ void MoveToPosition(int16_t x, int16_t y, int16_t z)
 
 void returnToInitPosition()
 {
-  base.MoveTo(base.init_angle);
-  shoulder.MoveTo(shoulder.init_angle);
-  elbow.MoveTo(elbow.init_angle);
-  claw.MoveTo(claw.init_angle);
+  base.MoveTo(base.getInitAngle());
+  shoulder.MoveTo(shoulder.getInitAngle());
+  elbow.MoveTo(elbow.getInitAngle());
+  claw.MoveTo(claw.getInitAngle());
 }
 
 void startrecord()
@@ -316,13 +346,33 @@ void startrecord()
 inline void record(uint16_t x, uint16_t y, uint16_t z, uint8_t claw_angle)
 {
   // 每1/2秒记录三舵机角度&钳子状态
-  strd.push_back(x, y, z, claw_angle);
+  uint8_t res = strd.push_back(x, y, z, claw_angle);
+  if (res == 0) // 录制满了，结束录制
+  {
+    isrecord = false;
+  }
 }
 
-inline void execute()
+inline void play()
 {
   // 从statusRecord中取出一位数据
   status sta = strd.read();
+  /*
+  Serial.print("播放数据点：");
+  Serial.print(sta.x);
+  Serial.print(",");
+  Serial.print(sta.y);
+  Serial.print(",");
+  Serial.print(sta.z);
+  Serial.print(",");
+  Serial.println(sta.claw_angle);
+  */
+  if (sta.x == 0 && sta.y == 0 && sta.z == 0 && sta.claw_angle == 0)
+  {
+    isplay = false;
+    Serial.println("播放结束");
+    return;
+  }
   base.MoveTo(sta.x);          // 控制底座舵机
   shoulder.MoveTo(sta.y);      // 控制大臂舵机
   elbow.MoveTo(sta.z);         // 控制小臂舵机

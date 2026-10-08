@@ -13,6 +13,7 @@ public:
     }
     ~Timer() {}
     float getTimeInterval(); // 刷新，并返回每次loop的时间间隔
+    bool isIntervalEnough (float interval); // 判断是否达到指定时间间隔，若达到则返回true，并刷新计时器
 
 private:
 };
