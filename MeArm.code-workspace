@@ -3,6 +3,10 @@
 		{
 			"name": "MeArm",
 			"path": "."
+		},
+		{
+			"name": "JoystickBoard",
+			"path": "C:/Users/17047/Documents/PlatformIO/Projects/JoystickBoard"
 		}
 	],
 	"settings": {
