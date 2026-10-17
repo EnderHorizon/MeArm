@@ -235,7 +235,7 @@ private:
   uint8_t len;       // uint8_t为1字节，可存储0~255，数组大小为120，故不会溢出
   uint8_t readindex; // 用于读取的时候记录读取位置
   bool fullNotified; // "已满"只提示一次，clear()时复位
-  status array[121];
+  status array[125];
 
 public:
   statusRecord()
@@ -272,7 +272,7 @@ void statusRecord::reRead()
 
 void statusRecord::interrupt(uint8_t x_r, uint8_t y_r, uint8_t z_r, uint8_t claw_angle_r)
 {
-  if (readindex < 121)
+  if (readindex < 125)
   {
     array[readindex].x = x_r;
     array[readindex].y = y_r;
@@ -284,7 +284,7 @@ void statusRecord::interrupt(uint8_t x_r, uint8_t y_r, uint8_t z_r, uint8_t claw
 uint8_t statusRecord::push_back(uint8_t x_r, uint8_t y_r, uint8_t z_r, uint8_t claw_angle_r)
 {
   // 边界检测,录制时间过长默认丢弃数据
-  if (len < 121)
+  if (len < 125)
   {
     // 存储录制坐标点&钳子角度
     array[len].x = x_r;
@@ -409,9 +409,9 @@ const float FORARM = 8;        // 小臂/cm
 const float UPPERARM = 8;      // 大臂
 const float BASEHEIGHT = 6;    // 底座高度
 const float CLAWLEN = 6.3f;    // 钳子长度
-uint8_t PENHEIGHT = 5;         // 落笔高度
+uint8_t PENHEIGHT = 4;         // 落笔高度
 const float CLAWOFFSET = 0.4f; // 爪子与中轴线的偏移量（俯视：摆平面与底座转轴的侧向距离 w，实测）
-const float BASE_ZERO = 4.64f; // 底座舵机 0° 零位补偿：底座角 0° 时臂指向与 x 轴的夹角（两点法标定，单位度）
+const float BASE_ZERO = 4.0f;  // 底座舵机 0° 零位补偿：底座角 0° 时臂指向与 x 轴的夹角（两点法标定，单位度）
 
 void returnToInitPosition(); // 归中
 
@@ -564,7 +564,7 @@ void loop()
           play();
         }
       }
-      else if (playtimer.isIntervalEnough(0.005f)) // 单位:秒，间隔0.25s播放一个记录点
+      else if (playtimer.isIntervalEnough(0.1f)) // 单位:秒，间隔0.25s播放一个记录点
       {
         Serial.print(".");
         play();
@@ -584,17 +584,17 @@ void loop()
   // Serial.print("|");
   // Serial.print(elbow.getCurrentAngle());
   // Serial.print("|");
-  // Serial.println(claw.getCurrentAngle());
+  // Serial.print(claw.getCurrentAngle());
   // Serial.print("||");
   // Serial.print("position:");
-  //  Vector testvec = AngleToPos(base.getCurrentAngle(), shoulder.getCurrentAngle(), elbow.getCurrentAngle());
-  //  Serial.print(testvec.x);
-  //  Serial.print(",");
-  //  Serial.print(testvec.y);
-  //  Serial.print(",");
-  //  Serial.println(testvec.z);
+  // Vector testvec = AngleToPos(base.getCurrentAngle(), shoulder.getCurrentAngle(), elbow.getCurrentAngle());
+  // Serial.print(testvec.x);
+  // Serial.print(",");
+  // Serial.print(testvec.y);
+  // Serial.print(",");
+  // Serial.println(testvec.z);
   //  每100ms向从机获取按钮数据:防止读取多读频繁中断阻塞
-  if (I2Ctimer.isIntervalEnough(0.2f))
+  if (I2Ctimer.isIntervalEnough(0.1f))
   {
     receiveData();
   }
@@ -802,8 +802,8 @@ void sensorRead()
   }
 }
 
-const float minR = 11;
-const float maxR = 22.5;
+const float minR = 11.5;
+const float maxR = 22;
 
 Vector PosToAngle(float x, float y, float z)
 {
@@ -831,12 +831,12 @@ Vector PosToAngle(float x, float y, float z)
   elbow_angle = shoulder_angle + acosf((square(UPPERARM) + square(FORARM) - (square(L) + square(h))) /
                                        (2.0f * UPPERARM * FORARM));
 
-  return Vector{ToDegree(base_angle), 122.0f - ToDegree(shoulder_angle), ToDegree(elbow_angle) - 50.0f};
+  return Vector{ToDegree(base_angle), 120.0f - ToDegree(shoulder_angle), ToDegree(elbow_angle) - 52.5f};
 }
 Vector AngleToPos(float a, float b, float c)
 {
-  b = 122.0f - b;
-  c = c + 50.0f;
+  b = 120.0f - b;
+  c = c + 52.5f;
   // 角度制转弧度制
   b = ToRadian(b);
   c = ToRadian(c);
@@ -925,8 +925,6 @@ void takePen()
   strd.push_back(159, 90, 85, PEN);
   strd.push_back(159, 40, 90, PEN);
   strd.push_back(90, 40, 90, PEN);
-  Vector getHeight = AngleToPos(160, 106, 85);
-  PENHEIGHT = getHeight.z;
 
   catchingtimer.update();
   iscatching = true;
@@ -1000,7 +998,7 @@ void receiveData()
       button[1][i] = button[0][i];
     }
     Wire.readBytes((uint8_t *)button, 4); // 读取四个字节
-    Serial.println("\n");
+    // Serial.println("\n");
   }
   else
   {
@@ -1130,11 +1128,11 @@ void createLine()
 
 void createLetter() // 字母“Z”
 {
-  samples[1] = Vector(-3, 15, PENHEIGHT);
-  samples[2] = Vector(-3, 19, PENHEIGHT);
+  samples[1] = Vector(-3, 16, PENHEIGHT);
+  samples[2] = Vector(-2, 19, PENHEIGHT);
   samples[3] = Vector(0, 17, PENHEIGHT);
-  samples[4] = Vector(3, 15, PENHEIGHT);
-  samples[5] = Vector(3, 19, PENHEIGHT);
+  samples[4] = Vector(4, 15, PENHEIGHT);
+  samples[5] = Vector(2, 19, PENHEIGHT);
   createStraightPath();
 }
 
@@ -1143,7 +1141,11 @@ void createStraightPath()
   strd.clear();
   const uint8_t sampling_density = 30; // 每条线段分成 48 段
 
-  // 数据点结构：sample1 - 47 - sample2 - 47 - sample3 - 47 - sample4 - 47 - sample5
+  // 抬笔
+  Vector downVec = PosToAngle(samples[1].x, samples[1].y, PENHEIGHT + 2);
+  strd.push_back(downVec.x, downVec.y, downVec.z, PEN);
+
+  // 数据点结构：sample1 - 29 - sample2 - 29 - sample3 - 29 - sample4 - 29 - sample5
   for (uint8_t i = 1; i < 5; ++i) // 5 个采样点 -> 4 条线段
   {
     const float x0 = samples[i].x, y0 = samples[i].y;
@@ -1165,6 +1167,13 @@ void createStraightPath()
   // 补上最后一个采样点（第 5 个点）
   Vector endVec = PosToAngle(samples[5].x, samples[5].y, PENHEIGHT);
   strd.push_back(endVec.x, endVec.y, endVec.z, PEN);
+
+  // 抬笔
+  Vector upVec = PosToAngle(samples[5].x, samples[5].y, PENHEIGHT + 2);
+  strd.push_back(upVec.x, upVec.y, upVec.z, PEN);
+  strd.push_back(upVec.x, upVec.y, upVec.z, PEN);
+  strd.push_back(upVec.x, upVec.y, upVec.z, PEN);
+  strd.push_back(upVec.x, upVec.y, upVec.z, PEN);
   Serial.println("折线生成完成，可以播放！");
 }
 
@@ -1221,6 +1230,9 @@ void createSmoothPath()
     tangentline[i].y = dy;
     tangentline[i].z = dz;
   }
+  // 落笔
+  Vector downVec = PosToAngle(samples[1].x, samples[1].y, PENHEIGHT + 3);
+  strd.push_back(downVec.x, downVec.y, downVec.z, PEN);
   // 三次Hermite基函数
   const uint8_t sampling_density = 30;
   for (uint8_t i = 0; i < 4; ++i) // 分别计算每一段曲线解析式，并生成采样点存入strd中
@@ -1253,7 +1265,14 @@ void createSmoothPath()
       strd.push_back(res_angle.x, res_angle.y, res_angle.z, PEN);
     }
   }
+  // 最后一点
   Vector endVec = PosToAngle(samples[5].x, samples[5].y, PENHEIGHT);
   strd.push_back(endVec.x, endVec.y, endVec.z, PEN);
+  // 抬笔
+  Vector upVec = PosToAngle(samples[5].x, samples[5].y, PENHEIGHT + 3);
+  strd.push_back(upVec.x, upVec.y, upVec.z, PEN);
+  strd.push_back(upVec.x, upVec.y, upVec.z, PEN);
+  strd.push_back(upVec.x, upVec.y, upVec.z, PEN);
+  strd.push_back(upVec.x, upVec.y, upVec.z, PEN);
   Serial.println("曲线生成完成，可以播放！");
 }
